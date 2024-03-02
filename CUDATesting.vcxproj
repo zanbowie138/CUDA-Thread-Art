@@ -13,6 +13,13 @@
   <ItemGroup>
     <CudaCompile Include="src\kernel.cu" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="lib\include\stb\stb_image.h" />
+    <ClInclude Include="src\math\vec2d.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="stb.cpp" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{3740E29B-1E32-4EB9-A89F-89126D109EBB}</ProjectGuid>
     <RootNamespace>CUDATesting</RootNamespace>
@@ -48,10 +55,12 @@
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)bin\intermediates\$(Platform)\$(Configuration)\</IntDir>
+    <IncludePath>$(SolutionDir)lib\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)bin\intermediates\$(Platform)\$(Configuration)\</IntDir>
+    <IncludePath>$(SolutionDir)lib\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -66,6 +75,8 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>%(Include)</Include>
+      <CompileOut>$(SolutionDir)bin\cuda\intermediates\$(ConfigurationName)\$(PlatformName)</CompileOut>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -85,6 +96,8 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>%(Include)</Include>
+      <CompileOut>$(SolutionDir)bin\cuda\intermediates\$(ConfigurationName)\$(PlatformName)</CompileOut>
     </CudaCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
