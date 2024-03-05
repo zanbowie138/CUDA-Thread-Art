@@ -1,25 +1,9 @@
-﻿#define NUM_PINS 150
-#define LINES 10
-#define M_PI 3.1415926535
-#define LINE_WIDTH 5
-#define UNIQUE_LINE_NUMBER NUM_PINS * (NUM_PINS - 1) / 2
+﻿#pragma once
 
-#include <cassert>
-#include <iostream>
-#include <vector>
+#include "cuda_threader.cuh"
 
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#include <stb/stb_image.h>
-
-#include <stdio.h>
 
 cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-
-struct Point
-{
-	int x, y;
-};
 
 __global__ void addKernel(int *c, const int *a, const int *b)
 {
@@ -27,238 +11,90 @@ __global__ void addKernel(int *c, const int *a, const int *b)
     c[i] = a[i] + b[i];
 }
 
-void writePPM(const char* filename, const uint8_t* data, int width, int height) {
-	FILE* file = fopen(filename, "wb");
-    if (file == NULL) { assert(false && "Error opening file"); }
-	fprintf(file, "P6\n%d %d\n255\n", width, height);
-	fwrite(data, sizeof(uint8_t), width * height * 3, file);
-	fclose(file);
-}
-
-std::vector<uint8_t> convert1c3c(const uint8_t* image, int width, int height) {
-	std::vector<uint8_t> three_channel_image(width * height * 3);
-	for (size_t i = 0; i < width * height; i++) {
-		three_channel_image[i * 3] = image[i];
-		three_channel_image[i * 3 + 1] = image[i];
-		three_channel_image[i * 3 + 2] = image[i];
-	} 
-	return three_channel_image;
-}
-
-std::vector<uint8_t> convertToGrayscale(const uint8_t* rgb_image, int width, int height) {
-    std::vector<uint8_t> gray_image(width * height);
-	for (size_t i = 0; i < width * height; i++) {
-		int r = rgb_image[i * 3];
-		int g = rgb_image[i * 3 + 1];
-		int b = rgb_image[i * 3 + 2];
-		int gray = 0.299 * r + 0.587 * g + 0.114 * b;
-		gray_image[i] = gray;
-	}
-    return gray_image;
-}
-
-std::vector<uint8_t> cropImageToSquare(const uint8_t* image, int width, int height) {
-    int size = std::min(width, height);
-    std::vector<uint8_t> cropped_image(size * size);
-    int startX = (width - size) / 2;
-    int startY = (height - size) / 2;
-    for (int y = 0; y < size; y++) {
-        for (int x = 0; x < size; x++) {
-            cropped_image[y * size + x] = image[(startY + y) * width + (startX + x)];
-        }
-    }
-    return cropped_image;
-}
-
-std::vector<Point> generatePins(int size, int pin_num) {
-    std::vector<Point> pins(pin_num);
-    float radius = size / 2.0f - 1;
-    float center = size / 2.0f;
-    float angleStep = 2.0f * M_PI / static_cast<float>(pin_num);
-
-    for (int i = 0; i < pin_num; i++) {
-        float angle = i * angleStep;
-        pins[i].x = center + radius * cos(angle);
-        pins[i].y = center + radius * sin(angle);
-    }
-
-    return pins;
-}
-
-std::vector<Point> getLinePoints(Point start, Point end, int lineWidth, int size) {
-    std::vector<Point> points;
-
-    int dx = abs(end.x - start.x);
-    int dy = abs(end.y - start.y);
-
-    int sx = (start.x < end.x) ? 1 : -1;
-    int sy = (start.y < end.y) ? 1 : -1;
-
-    int err = dx - dy;
-
-    while (true) {
-        points.push_back({ start.x, start.y });
-
-        // Add points for the line width
-        for (int i = -lineWidth / 2; i <= lineWidth / 2; ++i) {
-            if (abs(dx) > abs(dy)) {
-                if (start.y + i >= 0 && start.y + i < size) {
-                    points.push_back({ start.x, start.y + i });
-                }
-            }
-            else {
-                if (start.x + i >= 0 && start.x + i < size) {
-                    points.push_back({ start.x + i, start.y });
-                }
-            }
-        }
-
-        if (start.x == end.x && start.y == end.y) break;
-
-        int e2 = 2 * err;
-
-        if (e2 > -dy) {
-            err -= dy;
-            start.x += sx;
-        }
-
-        if (e2 < dx) {
-            err += dx;
-            start.y += sy;
-        }
-    }
-
-    return points;
-}
-
-
-
-static double calculateRMSError(const std::vector<uint8_t>& img1, const std::vector<uint8_t>& img2, int radius, int size) {
-    int center = size / 2;
-
-    double sum = 0.0;
-    int count = 0;
-
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            int dx = x - center;
-            int dy = y - center;
-            if (dx * dx + dy * dy <= radius * radius) {
-                int diff = img1[y * size + x] - img2[y * size + x];
-                sum += diff * diff;
-                ++count;
-            }
-        }
-    }
-
-    if (count == 0) {
-        assert(false && "Empty RMS");
-    }
-
-    return std::sqrt(sum / count);
-}
-
-static double calculateRMSError(const std::vector<uint8_t>& img1, const std::vector<uint8_t>& img2, size_t size, const std::vector<Point> coordinates) {
-    long sum = 0.0;
-    long count = 0;
-
-    for (Point p : coordinates) {
-        int diff = static_cast<int>(img1[p.y * size + p.x]) - 0;
-        sum += diff * diff;
-        ++count;
-    }
-
-    if (count == 0) {
-        assert(false && "Empty RMS");
-    }
-
-    return std::sqrt(sum / count);
-}
-
 
 void runCUDAThreader()
 {
-    //const int arraySize = 5;
-    //const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    //const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    //int c[arraySize] = { 0 };
+    const int arraySize = 5;
+    const int a[arraySize] = { 1, 2, 3, 4, 5 };
+    const int b[arraySize] = { 10, 20, 30, 40, 50 };
+    int c[arraySize] = { 0 };
 
-    //// Add vectors in parallel.
-    //cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    //if (cudaStatus != cudaSuccess) {
-    //    fprintf(stderr, "addWithCuda failed!");
-    //    return 1;
-    //}
-
-    //printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-    //    c[0], c[1], c[2], c[3], c[4]);
-
-    //// cudaDeviceReset must be called before exiting in order for profiling and
-    //// tracing tools such as Nsight and Visual Profiler to show complete traces.
-    //cudaStatus = cudaDeviceReset();
-    //if (cudaStatus != cudaSuccess) {
-    //    fprintf(stderr, "cudaDeviceReset failed!");
-    //    return 1;
-    //}
-
-    int width, height, bpp;
-
-    uint8_t* rgb_image = stbi_load("res/huge_walter.png", &width, &height, &bpp, 3);
-
-    const auto gray_image = convertToGrayscale(rgb_image, width, height);
-
-    stbi_image_free(rgb_image);
-
-    auto cropped_image = cropImageToSquare(gray_image.data(), width, height);
-    auto thread_image = std::vector<uint8_t>(cropped_image.size(), 255);
-    auto compare_image = cropped_image;
-    size_t size = std::min(width, height);
-    auto pins = generatePins(size, NUM_PINS);
-    std::vector<uint8_t> pin_image = cropped_image; // Copy the cropped image
-    for (const auto& pin : pins) {
-        pin_image[pin.y * size + pin.x] = 255; // Set the pixel at the pin's coordinates to white
+    // Add vectors in parallel.
+    cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "addWithCuda failed!");
+        return;
     }
-    bool linesDrawn[UNIQUE_LINE_NUMBER] = {false};
-    std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
-    std::cout << "UNIQUE_LINE_NUMBER: " << UNIQUE_LINE_NUMBER << "\n";
-    assert(LINES <= UNIQUE_LINE_NUMBER && "Too many lines. Max is: " + UNIQUE_LINE_NUMBER);
-    std::cout << "LINES: " << LINES << "\n";
-    
 
-    for (size_t l = 0; l < LINES; l++) {
-        double bestError = std::numeric_limits<double>::max();
-        size_t bestLine = 0;
-        // 3 2 1
-        // 0     1   2
-        // 1 2 3 2 3 3
-        for (size_t i = 0; i < NUM_PINS-1; i++) {
-            for (size_t j = i + 1; j < NUM_PINS; j++) {
-                const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
-                if (l == 0) { lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, size); }
-                //std::cout << "Line: " << lineIdx << "\n";
-                if (linesDrawn[lineIdx]) { continue; }
-                double error = calculateRMSError(compare_image, thread_image, size, lines[lineIdx]);
-                if (error < bestError && !linesDrawn[lineIdx]) {
-					bestError = error;
-					bestLine = lineIdx;
-				}
-            }
-		}
-        assert(linesDrawn[bestLine] == false && "Line already drawn");
-        linesDrawn[bestLine] = true;
-        for (const auto& point : lines[bestLine]) {
-			thread_image[point.y * size + point.x] = 0;
-            compare_image[point.y * size + point.x] = std::min(compare_image[point.y * size + point.x] + 40, 255);
+    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
+        c[0], c[1], c[2], c[3], c[4]);
 
-		}
-        std::cout << "Best line: " << bestLine << " with error: " << bestError << "\n";
-	}
+    // cudaDeviceReset must be called before exiting in order for profiling and
+    // tracing tools such as Nsight and Visual Profiler to show complete traces.
+    cudaStatus = cudaDeviceReset();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceReset failed!");
+        return;
+    }
 
-    writePPM("output/original.ppm", convert1c3c(pin_image.data(), size, size).data(), size, size);
-    writePPM("output/output.ppm", convert1c3c(thread_image.data(), size, size).data(), size, size);
-    writePPM("output/compare_img.ppm", convert1c3c(compare_image.data(), size, size).data(), size, size);
+ //   int width, height, bpp;
 
-    std::cout << "RMS: " << calculateRMSError(cropped_image, thread_image, size/2-1, size) << "\n";
+ //   uint8_t* rgb_image = stbi_load("res/huge_walter.png", &width, &height, &bpp, 3);
+
+ //   const auto gray_image = convertToGrayscale(rgb_image, width, height);
+
+ //   stbi_image_free(rgb_image);
+
+ //   auto cropped_image = cropImageToSquare(gray_image.data(), width, height);
+ //   auto thread_image = std::vector<uint8_t>(cropped_image.size(), 255);
+ //   auto compare_image = cropped_image;
+ //   size_t size = std::min(width, height);
+ //   auto pins = generatePins(size, NUM_PINS);
+ //   std::vector<uint8_t> pin_image = cropped_image; // Copy the cropped image
+ //   for (const auto& pin : pins) {
+ //       pin_image[pin.y * size + pin.x] = 255; // Set the pixel at the pin's coordinates to white
+ //   }
+ //   bool linesDrawn[UNIQUE_LINE_NUMBER] = {false};
+ //   std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
+ //   std::cout << "UNIQUE_LINE_NUMBER: " << UNIQUE_LINE_NUMBER << "\n";
+ //   assert(LINES <= UNIQUE_LINE_NUMBER && "Too many lines. Max is: " + UNIQUE_LINE_NUMBER);
+ //   std::cout << "LINES: " << LINES << "\n";
+ //   
+
+ //   for (size_t l = 0; l < LINES; l++) {
+ //       double bestError = std::numeric_limits<double>::max();
+ //       size_t bestLine = 0;
+ //       // 3 2 1
+ //       // 0     1   2
+ //       // 1 2 3 2 3 3
+ //       for (size_t i = 0; i < NUM_PINS-1; i++) {
+ //           for (size_t j = i + 1; j < NUM_PINS; j++) {
+ //               const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
+ //               if (l == 0) { lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, size); }
+ //               //std::cout << "Line: " << lineIdx << "\n";
+ //               if (linesDrawn[lineIdx]) { continue; }
+ //               double error = calculateRMSError(compare_image, thread_image, size, lines[lineIdx]);
+ //               if (error < bestError && !linesDrawn[lineIdx]) {
+	//				bestError = error;
+	//				bestLine = lineIdx;
+	//			}
+ //           }
+	//	}
+ //       assert(linesDrawn[bestLine] == false && "Line already drawn");
+ //       linesDrawn[bestLine] = true;
+ //       for (const auto& point : lines[bestLine]) {
+	//		thread_image[point.y * size + point.x] = 0;
+ //           compare_image[point.y * size + point.x] = std::min(compare_image[point.y * size + point.x] + 40, 255);
+
+	//	}
+ //       std::cout << "Best line: " << bestLine << " with error: " << bestError << "\n";
+	//}
+
+ //   writePPM("output/original.ppm", convert1c3c(pin_image.data(), size, size).data(), size, size);
+ //   writePPM("output/output.ppm", convert1c3c(thread_image.data(), size, size).data(), size, size);
+ //   writePPM("output/compare_img.ppm", convert1c3c(compare_image.data(), size, size).data(), size, size);
+
+ //   std::cout << "RMS: " << calculateRMSError(cropped_image, thread_image, size/2-1, size) << "\n";
 }
 
 // Helper function for using CUDA to add vectors in parallel.
