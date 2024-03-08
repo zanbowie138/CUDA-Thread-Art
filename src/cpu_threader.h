@@ -14,7 +14,7 @@ inline void runCPUThreader()
     auto originalImage = utils::prepareImage("res/huge_walter.png", imgSize);
 
     // Shows drawn threads
-    auto threadImage = std::vector<uint8_t>(originalImage.size(), 255);
+    auto threadImage = std::vector<unsigned char>(originalImage.size(), 255);
     // Stores the error comparison image
     auto truthImage = originalImage;
     // Shows the pins
@@ -32,10 +32,10 @@ inline void runCPUThreader()
     std::cout << "UNIQUE_LINE_NUMBER: " << UNIQUE_LINE_NUMBER << "\n";
     //std::cout << "This code is running." << std::endl;
     //assert(LINES <= UNIQUE_LINE_NUMBER && "Too many lines. Max is: " + UNIQUE_LINE_NUMBER);
-    std::cout << "LINES: " << LINES << "\n";
+    std::cout << "NUM_LINES: " << NUM_LINES << "\n";
 
 
-    for (size_t l = 0; l < LINES; l++) {
+    for (size_t l = 0; l < NUM_LINES; l++) {
         double bestError = std::numeric_limits<double>::max();
         size_t bestLine = 0;
         for (size_t i = 0; i < NUM_PINS - 1; i++) {

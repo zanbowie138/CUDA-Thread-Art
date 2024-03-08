@@ -10,7 +10,8 @@ namespace utils
 {
     struct Point
     {
-        int x, y;
+        unsigned short x;
+        unsigned short y;
     };
 
     static void writePPM(const char* filename, const uint8_t* data, int width, int height) {
@@ -43,6 +44,80 @@ namespace utils
         return gray_image;
     }
 
+    static std::vector<Point> getLinePoints(Point start, Point end, int lineWidth, int size) {
+        std::vector<Point> points;
+
+        int dx = abs(end.x - start.x);
+        int dy = abs(end.y - start.y);
+
+        int sx = (start.x < end.x) ? 1 : -1;
+        int sy = (start.y < end.y) ? 1 : -1;
+
+        int err = dx - dy;
+
+        while (true) {
+            points.push_back({ start.x, start.y });
+
+            // Add points for the line width
+            for (short i = -lineWidth / 2; i <= lineWidth / 2; ++i) {
+                if (abs(dx) > abs(dy)) {
+                    if (start.y + i >= 0 && start.y + i < size) {
+                        points.push_back({ start.x, static_cast<unsigned short>(start.y + i) });
+                    }
+                }
+                else {
+                    if (start.x + i >= 0 && start.x + i < size) {
+                        points.push_back({ static_cast<unsigned short>(start.x + i), start.y });
+                    }
+                }
+            }
+
+            if (start.x == end.x && start.y == end.y) break;
+
+            int e2 = 2 * err;
+
+            if (e2 > -dy) {
+                err -= dy;
+                start.x += sx;
+            }
+
+            if (e2 < dx) {
+                err += dx;
+                start.y += sy;
+            }
+        }
+
+        return points;
+    }
+
+    static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, int imgSize, std::vector<unsigned int>& lineEndingIdx)
+    {
+        std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
+        size_t pointAmount = 0;
+        for (size_t i = 0; i < NUM_PINS - 1; i++) {
+            for (size_t j = i + 1; j < NUM_PINS; j++) {
+                const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
+                lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, imgSize);
+                pointAmount += lines[lineIdx].size();
+            }
+        }
+
+        auto linesArray = std::vector<unsigned short>(pointAmount * 2);
+        for (size_t i = 0; i < lines.size(); i++) {
+            std::vector<Point> line = lines[i];
+            if (i != 0) {
+                lineEndingIdx[i] = lineEndingIdx[i - 1] + line.size();
+                memcpy(&(linesArray[lineEndingIdx[i - 1] * 2 + 1]), line.data(), line.size() * sizeof(Point));
+            }
+            else
+            {
+                lineEndingIdx[i] = line.size();
+                memcpy(linesArray.data(), line.data(), line.size() * sizeof(Point));
+            }
+        }
+        return linesArray;
+    }
+
     static std::vector<uint8_t> cropImageToSquare(const uint8_t* image, int width, int height) {
         int size = std::min(width, height);
         std::vector<uint8_t> cropped_image(size * size);
@@ -71,55 +146,7 @@ namespace utils
         return pins;
     }
 
-    static std::vector<Point> getLinePoints(Point start, Point end, int lineWidth, int size) {
-        std::vector<Point> points;
-
-        int dx = abs(end.x - start.x);
-        int dy = abs(end.y - start.y);
-
-        int sx = (start.x < end.x) ? 1 : -1;
-        int sy = (start.y < end.y) ? 1 : -1;
-
-        int err = dx - dy;
-
-        while (true) {
-            points.push_back({ start.x, start.y });
-
-            // Add points for the line width
-            for (int i = -lineWidth / 2; i <= lineWidth / 2; ++i) {
-                if (abs(dx) > abs(dy)) {
-                    if (start.y + i >= 0 && start.y + i < size) {
-                        points.push_back({ start.x, start.y + i });
-                    }
-                }
-                else {
-                    if (start.x + i >= 0 && start.x + i < size) {
-                        points.push_back({ start.x + i, start.y });
-                    }
-                }
-            }
-
-            if (start.x == end.x && start.y == end.y) break;
-
-            int e2 = 2 * err;
-
-            if (e2 > -dy) {
-                err -= dy;
-                start.x += sx;
-            }
-
-            if (e2 < dx) {
-                err += dx;
-                start.y += sy;
-            }
-        }
-
-        return points;
-    }
-
-
-
-    static double calculateRMSError(const std::vector<uint8_t>& img1, const std::vector<uint8_t>& img2, int radius, int size) {
+    static double calculateRMSError(const std::vector<unsigned char>& img1, const std::vector<unsigned char>& img2, int radius, int size) {
         int center = size / 2;
 
         double sum = 0.0;
@@ -144,7 +171,7 @@ namespace utils
         return std::sqrt(sum / count);
     }
 
-    static double calculateRMSError(const std::vector<uint8_t>& img1, const std::vector<uint8_t>& img2, size_t size, const std::vector<Point> coordinates) {
+    static double calculateRMSError(const std::vector<unsigned char>& img1, const std::vector<unsigned char>& img2, size_t size, const std::vector<Point> coordinates) {
         long sum = 0.0;
         long count = 0;
 
@@ -161,7 +188,7 @@ namespace utils
         return std::sqrt(sum / count);
     }
 
-    static std::vector<uint8_t> prepareImage(const char* filename, size_t& size) {
+    static std::vector<unsigned char> prepareImage(const char* filename, size_t& size) {
         int width, height, bpp;
 
         uint8_t* rgb_image = stbi_load(filename, &width, &height, &bpp, 3);
@@ -170,6 +197,6 @@ namespace utils
         auto cropped_image = cropImageToSquare(gray_image.data(), width, height);
         size = std::min(width, height);
 
-        return cropped_image;
+        return { cropped_image.begin(), cropped_image.end() };
     }
 }

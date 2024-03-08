@@ -17,18 +17,7 @@
  * Maximum number of resident grids per device (Concurrent Kernel Execution): 128
  */
 
-
-cudaError_t addWithCuda(int* c, const int* a, const int* b, unsigned int size);
-
-__global__ void addKernel(int* c, const int* a, const int* b);
-
 __global__ void evaluateLineKernel();
-
-cudaError_t findBestLine();
 
 void runCUDAThreader();
 
-void addVectors();
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int* c, const int* a, const int* b, unsigned int size);
