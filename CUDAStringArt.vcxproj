@@ -11,6 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\config.h" />
     <ClInclude Include="src\cpu_threader.h" />
     <ClInclude Include="src\cuda_threader.cuh" />
     <ClInclude Include="src\utils.h" />

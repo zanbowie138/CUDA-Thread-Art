@@ -1,7 +1,8 @@
 #define RUN_WITH_CUDA 1
 
-#include "cpu_threader.h"
 #include "cuda_threader.cuh"
+#include "cpu_threader.h"
+
 
 int main()
 {

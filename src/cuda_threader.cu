@@ -1,9 +1,16 @@
-﻿#pragma once
+﻿#include "cuda_threader.cuh"
 
-#include "cuda_threader.cuh"
+#include "utils.h"
 
-
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
+#define cudaErrorCheck(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort = true)
+{
+    if (code != cudaSuccess)
+    {
+        fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+        if (abort) exit(code);
+    }
+}
 
 __global__ void addKernel(int *c, const int *a, const int *b)
 {
@@ -11,8 +18,220 @@ __global__ void addKernel(int *c, const int *a, const int *b)
     c[i] = a[i] + b[i];
 }
 
+struct Point
+{
+    unsigned short x;
+    unsigned short y;
+};
+
+static std::vector<Point> getLinePoints(Point start, Point end, int lineWidth, int size) {
+    std::vector<Point> points;
+
+    int dx = abs(end.x - start.x);
+    int dy = abs(end.y - start.y);
+
+    int sx = (start.x < end.x) ? 1 : -1;
+    int sy = (start.y < end.y) ? 1 : -1;
+
+    int err = dx - dy;
+
+    while (true) {
+        points.push_back({ start.x, start.y });
+
+        // Add points for the line width
+        for (short i = -lineWidth / 2; i <= lineWidth / 2; ++i) {
+            if (abs(dx) > abs(dy)) {
+                if (start.y + i >= 0 && start.y + i < size) {
+                    points.push_back({ start.x, static_cast<unsigned short>(start.y + i) });
+                }
+            }
+            else {
+                if (start.x + i >= 0 && start.x + i < size) {
+                    points.push_back({ static_cast<unsigned short>(start.x + i), start.y });
+                }
+            }
+        }
+
+        if (start.x == end.x && start.y == end.y) break;
+
+        int e2 = 2 * err;
+
+        if (e2 > -dy) {
+            err -= dy;
+            start.x += sx;
+        }
+
+        if (e2 < dx) {
+            err += dx;
+            start.y += sy;
+        }
+    }
+
+    return points;
+}
+
+static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, int imgSize, unsigned int* &lineEndingIdx)
+{
+    lineEndingIdx = new unsigned int[UNIQUE_LINE_NUMBER];
+
+    std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
+    size_t pointAmount = 0;
+    for (size_t i = 0; i < NUM_PINS - 1; i++) {
+        for (size_t j = i + 1; j < NUM_PINS; j++) {
+            const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
+            lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, imgSize);
+            pointAmount += lines[lineIdx].size();
+        }
+    }
+
+    auto linesArray = std::vector<unsigned short>(pointAmount * 2);
+    for (size_t i = 0; i < lines.size(); i++) {
+        std::vector<Point> line = lines[i];
+        if (i != 0) {
+            lineEndingIdx[i] = lineEndingIdx[i - 1] + line.size();
+            memcpy(&(linesArray[lineEndingIdx[i - 1] * 2 + 1]), line.data(), line.size() * sizeof(Point));
+        }
+        else
+        {
+	        lineEndingIdx[i] = line.size();
+            memcpy(linesArray.data(), line.data(), line.size() * sizeof(Point));
+        }
+	}
+    return linesArray;
+}
+
+static std::vector<Point> generatePins(size_t size, int pin_num) {
+    std::vector<Point> pins(pin_num);
+    float radius = size / 2.0f - 1;
+    float center = size / 2.0f;
+    float angleStep = 2.0f * 3.14159 / static_cast<float>(pin_num);
+
+    for (int i = 0; i < pin_num; i++) {
+        float angle = i * angleStep;
+        pins[i].x = center + radius * cos(angle);
+        pins[i].y = center + radius * sin(angle);
+    }
+
+    return pins;
+}
+
+__global__ void evaluateLineKernel(unsigned char* threadImg, const unsigned char* truthImg, const unsigned short* lineArray, const unsigned int* lineEndingIdx, unsigned int uniqueLineAmt, unsigned int imgSize)
+{
+    const unsigned int idx = threadIdx.x;
+    if (idx >= UNIQUE_LINE_NUMBER) { return; }
+
+    const unsigned int linesPerThread = static_cast<unsigned int>(ceil(static_cast<double>(uniqueLineAmt) / blockDim.x));
+    unsigned int lineAmt;
+    if (idx != blockDim.x || uniqueLineAmt % blockDim.x == 0)
+    {
+        lineAmt = linesPerThread;
+    }
+    else
+    {
+        lineAmt = uniqueLineAmt % blockDim.x;
+    }
+
+    for (int i = 0; i < lineAmt; i++)
+    {
+        unsigned int lineIdx = idx * linesPerThread + i;
+        unsigned int lineStart;
+        unsigned int lineSize;
+
+        if (lineIdx != 0)
+        {
+            //printf("lineIdx: %d\n", lineIdx);
+            lineStart = lineEndingIdx[lineIdx - 1] * 2 + 1;
+            lineSize = (lineEndingIdx[lineIdx] - lineEndingIdx[lineIdx - 1]) * 2;
+        }
+        else
+        {
+            printf("lineIdx: %d\n", lineIdx);
+            lineStart = 0;
+            lineSize = lineEndingIdx[0] * 2;
+            printf("lineSize: %d\n", lineSize);
+        }
+
+        for (int j = 0; j < lineSize; j += 2)
+        {
+            unsigned short x = lineArray[lineStart + j];
+            unsigned short y = lineArray[lineStart + j + 1];
+            threadImg[x + y * imgSize] = 255;
+        }
+    }
+}
+
 
 void runCUDAThreader()
+{
+    size_t imgSize;
+    const auto originalImageLarge = utils::prepareImage("res/huge_walter.png", imgSize);
+    const std::vector<unsigned char> originalImage(originalImageLarge.begin(), originalImageLarge.end());
+
+	const auto pins = generatePins(imgSize, NUM_PINS);
+
+	unsigned int* linePtrOffsets;
+    auto lines = calculateLines(pins, imgSize, linePtrOffsets);
+
+    unsigned char* threadImageGPU;
+    unsigned char* truthImageGPU;
+    unsigned short* linesArrayGPU;
+    unsigned int* linePtrOffsetsGPU;
+
+    // Choose which GPU to run on, change this on a multi-GPU system.
+    cudaErrorCheck(cudaSetDevice(0));
+    
+
+    // Allocate GPU buffers for three vectors.
+    cudaErrorCheck(cudaMalloc((void**)&truthImageGPU, imgSize * imgSize * sizeof(unsigned char)));
+
+    cudaErrorCheck(cudaMalloc((void**)&threadImageGPU, imgSize * imgSize * sizeof(unsigned char)));
+
+    cudaErrorCheck(cudaMemset(threadImageGPU, 0, imgSize * imgSize * sizeof(unsigned char)));
+
+    cudaErrorCheck(cudaMalloc((void**)&linesArrayGPU,lines.size() * sizeof(unsigned short)));
+
+    cudaErrorCheck(cudaMalloc((void**)&linePtrOffsetsGPU, UNIQUE_LINE_NUMBER * sizeof(unsigned int)));
+
+    // Copy image frame from host memory to GPU buffers.
+    cudaErrorCheck(cudaMemcpy(threadImageGPU, originalImage.data(), imgSize * imgSize * sizeof(unsigned char), cudaMemcpyHostToDevice));
+
+	cudaErrorCheck(cudaMemcpy(linesArrayGPU, lines.data(), lines.size() * sizeof(unsigned short), cudaMemcpyHostToDevice));
+
+	cudaErrorCheck(cudaMemcpy(linePtrOffsetsGPU, linePtrOffsets, UNIQUE_LINE_NUMBER * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    
+
+	std::cout << "CUDA threader started" << std::endl;
+	std::cout << "Unique Lines: " << UNIQUE_LINE_NUMBER << std::endl;
+    //delete[] linePtrOffsets;
+
+    evaluateLineKernel<<<1, 1 >>>(threadImageGPU, truthImageGPU, linesArrayGPU, linePtrOffsetsGPU, UNIQUE_LINE_NUMBER, imgSize);
+
+    // Check for any errors launching the kernel
+    cudaErrorCheck(cudaGetLastError());
+
+    // cudaDeviceSynchronize waits for the kernel to finish, and returns
+    // any errors encountered during the launch.
+    cudaErrorCheck(cudaDeviceSynchronize());
+
+    // Copy output vector from GPU buffer to host memory.
+    auto threadImageOutput = std::vector<unsigned char>(imgSize * imgSize);
+    cudaErrorCheck(cudaMemcpy(threadImageOutput.data(), threadImageGPU, imgSize * imgSize * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+
+    auto truthImageOutput = std::vector<unsigned char>(imgSize * imgSize);
+    cudaErrorCheck(cudaMemcpy(truthImageOutput.data(), truthImageGPU, imgSize * imgSize * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+
+    utils::writePPM("output/output_cuda.ppm", utils::convert1c3c(threadImageOutput.data(), imgSize, imgSize).data(), imgSize, imgSize);
+    utils::writePPM("output/truth_cuda.ppm", utils::convert1c3c(truthImageOutput.data(), imgSize, imgSize).data(), imgSize, imgSize);
+
+    std::cout << "CUDA threader finished" << std::endl;
+
+    cudaFree(threadImageGPU);
+    cudaFree(truthImageGPU);
+    cudaFree(linesArrayGPU);
+    cudaFree(linePtrOffsetsGPU);
+}
+
+void addVectors()
 {
     const int arraySize = 5;
     const int a[arraySize] = { 1, 2, 3, 4, 5 };
@@ -36,65 +255,6 @@ void runCUDAThreader()
         fprintf(stderr, "cudaDeviceReset failed!");
         return;
     }
-
- //   int width, height, bpp;
-
- //   uint8_t* rgb_image = stbi_load("res/huge_walter.png", &width, &height, &bpp, 3);
-
- //   const auto gray_image = convertToGrayscale(rgb_image, width, height);
-
- //   stbi_image_free(rgb_image);
-
- //   auto cropped_image = cropImageToSquare(gray_image.data(), width, height);
- //   auto thread_image = std::vector<uint8_t>(cropped_image.size(), 255);
- //   auto compare_image = cropped_image;
- //   size_t size = std::min(width, height);
- //   auto pins = generatePins(size, NUM_PINS);
- //   std::vector<uint8_t> pin_image = cropped_image; // Copy the cropped image
- //   for (const auto& pin : pins) {
- //       pin_image[pin.y * size + pin.x] = 255; // Set the pixel at the pin's coordinates to white
- //   }
- //   bool linesDrawn[UNIQUE_LINE_NUMBER] = {false};
- //   std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
- //   std::cout << "UNIQUE_LINE_NUMBER: " << UNIQUE_LINE_NUMBER << "\n";
- //   assert(LINES <= UNIQUE_LINE_NUMBER && "Too many lines. Max is: " + UNIQUE_LINE_NUMBER);
- //   std::cout << "LINES: " << LINES << "\n";
- //   
-
- //   for (size_t l = 0; l < LINES; l++) {
- //       double bestError = std::numeric_limits<double>::max();
- //       size_t bestLine = 0;
- //       // 3 2 1
- //       // 0     1   2
- //       // 1 2 3 2 3 3
- //       for (size_t i = 0; i < NUM_PINS-1; i++) {
- //           for (size_t j = i + 1; j < NUM_PINS; j++) {
- //               const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
- //               if (l == 0) { lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, size); }
- //               //std::cout << "Line: " << lineIdx << "\n";
- //               if (linesDrawn[lineIdx]) { continue; }
- //               double error = calculateRMSError(compare_image, thread_image, size, lines[lineIdx]);
- //               if (error < bestError && !linesDrawn[lineIdx]) {
-	//				bestError = error;
-	//				bestLine = lineIdx;
-	//			}
- //           }
-	//	}
- //       assert(linesDrawn[bestLine] == false && "Line already drawn");
- //       linesDrawn[bestLine] = true;
- //       for (const auto& point : lines[bestLine]) {
-	//		thread_image[point.y * size + point.x] = 0;
- //           compare_image[point.y * size + point.x] = std::min(compare_image[point.y * size + point.x] + 40, 255);
-
-	//	}
- //       std::cout << "Best line: " << bestLine << " with error: " << bestError << "\n";
-	//}
-
- //   writePPM("output/original.ppm", convert1c3c(pin_image.data(), size, size).data(), size, size);
- //   writePPM("output/output.ppm", convert1c3c(thread_image.data(), size, size).data(), size, size);
- //   writePPM("output/compare_img.ppm", convert1c3c(compare_image.data(), size, size).data(), size, size);
-
- //   std::cout << "RMS: " << calculateRMSError(cropped_image, thread_image, size/2-1, size) << "\n";
 }
 
 // Helper function for using CUDA to add vectors in parallel.
