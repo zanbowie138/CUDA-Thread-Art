@@ -35,7 +35,6 @@ __device__ unsigned long long int atomicMinIndex(unsigned long long int* array, 
 	return testVal.ulong;
 }
 
-
 __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* truthImg,
                                    const unsigned short* lineArray, const unsigned int* lineEndingIdx,
                                    unsigned int globalLineAmt, unsigned int imgSize)
@@ -150,11 +149,11 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* trut
 	delete[] finishedLines;
 }
 
-void runCUDAThreader()
+std::vector<unsigned char> runCUDAThreader(unsigned int& size)
 {
 	size_t imgSize;
-	const auto originalImageLarge = utils::prepareImage("res/huge_walter.png", imgSize);
-	const std::vector<unsigned char> originalImage(originalImageLarge.begin(), originalImageLarge.end());
+	const auto originalImage = utils::prepareImage("res/huge_walter.png", imgSize);
+	size = imgSize;
 
 	const auto pins = utils::generatePins(imgSize, NUM_PINS);
 
@@ -231,4 +230,6 @@ void runCUDAThreader()
 	cudaFree(truthImageGPU);
 	cudaFree(linesArrayGPU);
 	cudaFree(linePtrOffsetsGPU);
+
+	return threadImageOutput;
 }

@@ -53,4 +53,4 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, const unsigned char
                                    const unsigned short* lineArray, const unsigned int* lineEndingIdx,
                                    unsigned int globalLineAmt, unsigned int imgSize);
 
-void runCUDAThreader();
+std::vector<unsigned char> runCUDAThreader(unsigned int& size);

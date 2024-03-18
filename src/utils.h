@@ -14,7 +14,8 @@ namespace utils
         unsigned short y;
     };
 
-    static void writePPM(const char* filename, const uint8_t* data, int width, int height) {
+    // Writes a 3 channel RGB image to a ppm file
+    static void writePPM(const char* filename, const unsigned char* data, const int width, const int height) {
         FILE* file = fopen(filename, "wb");
         if (file == NULL) { assert(false && "Error opening file"); }
         fprintf(file, "P6\n%d %d\n255\n", width, height);
@@ -22,8 +23,9 @@ namespace utils
         fclose(file);
     }
 
-    static std::vector<uint8_t> convert1c3c(const uint8_t* image, int width, int height) {
-        std::vector<uint8_t> three_channel_image(width * height * 3);
+    // Converts a 1 channel image to a 3 channel image
+    static std::vector<unsigned char> convert1c3c(const unsigned char* image, const int width, const int height) {
+        std::vector<unsigned char> three_channel_image(width * height * 3);
         for (size_t i = 0; i < width * height; i++) {
             three_channel_image[i * 3] = image[i];
             three_channel_image[i * 3 + 1] = image[i];
@@ -32,8 +34,9 @@ namespace utils
         return three_channel_image;
     }
 
-    static std::vector<uint8_t> convertToGrayscale(const uint8_t* rgb_image, int width, int height) {
-        std::vector<uint8_t> gray_image(width * height);
+    // Converts an rgb image to a grayscale image
+    static std::vector<unsigned char> convertToGrayscale(const unsigned char* rgb_image, const int width, const int height) {
+        std::vector<unsigned char> gray_image(width * height);
         for (size_t i = 0; i < width * height; i++) {
             int r = rgb_image[i * 3];
             int g = rgb_image[i * 3 + 1];
@@ -44,7 +47,8 @@ namespace utils
         return gray_image;
     }
 
-    static std::vector<Point> getLinePoints(Point start, Point end, int lineWidth, int size) {
+    // Calculates the pixel points for a line
+    static std::vector<Point> getLinePoints(Point start, const Point end, const int lineWidth, const int size) {
         std::vector<Point> points;
 
         int dx = abs(end.x - start.x);
@@ -90,7 +94,9 @@ namespace utils
         return points;
     }
 
-    static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, int imgSize, std::vector<unsigned int>& lineEndingIdx)
+    // Returns a vector of line coordinates, and a vector of line ending indices
+    // Ensures that line coordinates are in contiguous memory
+    static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, const int imgSize, std::vector<unsigned int>& lineEndingIdx)
     {
         std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
         size_t pointAmount = 0;
@@ -118,9 +124,9 @@ namespace utils
         return linesArray;
     }
 
-    static std::vector<uint8_t> cropImageToSquare(const uint8_t* image, int width, int height) {
+    static std::vector<unsigned char> cropImageToSquare(const unsigned char* image, int width, int height) {
         int size = std::min(width, height);
-        std::vector<uint8_t> cropped_image(size * size);
+        std::vector<unsigned char> cropped_image(size * size);
         int startX = (width - size) / 2;
         int startY = (height - size) / 2;
         for (int y = 0; y < size; y++) {
