@@ -56,7 +56,6 @@ inline void runCPUThreader()
         for (const auto& point : lines[bestLine]) {
             threadImage[point.y * imgSize + point.x] = 0;
             truthImage[point.y * imgSize + point.x] = std::min(truthImage[point.y * imgSize + point.x] + 40, 255);
-
         }
         std::cout << "Best line: " << bestLine << " with error: " << bestError << "\n";
     }

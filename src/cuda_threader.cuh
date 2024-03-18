@@ -37,6 +37,13 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
 	}
 }
 
+typedef union {
+	// floats[0] is the value, ints[1] is the index
+	float floats[2];
+	unsigned int ints[2];
+	unsigned long long int ulong;
+} SortUnion;
+
 
 
 __device__ double calculateRMSError(unsigned char* threadImg, const unsigned char* truthImg, unsigned int imgSize,

@@ -2,7 +2,7 @@
 
 #include "utils.h"
 
-__device__ float calculateRMSError(const unsigned char* threadImg, const unsigned char* truthImg,
+__device__ float calculateRMSError(const unsigned char* truthImg,
                                    const unsigned int imgSize,
                                    const unsigned short* lineArray, const unsigned int lineStart,
                                    const unsigned int lineSize)
@@ -10,11 +10,7 @@ __device__ float calculateRMSError(const unsigned char* threadImg, const unsigne
 	float avg = 0.0;
 	const float count = lineSize / 2;
 
-	if (lineSize == 0)
-	{
-		printf("Empty RMS\n");
-		assert(false && "Empty RMS");
-	}
+	if (lineSize == 0) { printf("Empty RMS\n"); }
 
 	for (int i = 0; i < lineSize; i += 2)
 	{
@@ -27,14 +23,6 @@ __device__ float calculateRMSError(const unsigned char* threadImg, const unsigne
 	return sqrtf(avg);
 }
 
-typedef union {
-	float floats[2];
-	unsigned int ints[2];\
-	unsigned long long int ulong;
-} SortUnion;
-
-// TODO: Check functionality
-// I have no clue how this works...
 __device__ unsigned long long int atomicMinIndex(unsigned long long int* array, float value, int idx) {
 	SortUnion thisVal, testVal;
 	thisVal.floats[0] = value;
@@ -53,41 +41,26 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* trut
                                    unsigned int globalLineAmt, unsigned int imgSize)
 {
 	const unsigned int tIdx = threadIdx.x;
-	//printf("Thread %d: Starting...\n", tIdx);
+
 	if (tIdx >= UNIQUE_LINE_NUMBER) { return; }
 
-	const unsigned int linesPerThread = static_cast<unsigned int>(
+	const unsigned int baseLinesPerThread = static_cast<unsigned int>(
 		floor(static_cast<double>(UNIQUE_LINE_NUMBER) / blockDim.x));
-
 	const unsigned int remainder = UNIQUE_LINE_NUMBER % blockDim.x;
-	unsigned int threadLineAmt;
-	if (tIdx < remainder)
-	{
-		threadLineAmt = linesPerThread + 1;
-	}
-	else
-	{
-		threadLineAmt = linesPerThread;
-	}
 
-	//printf("Thread %d: Lines Amt: %d\n", tIdx, threadLineAmt);
+	// Amount of lines for this thread
+	unsigned int threadLineAmt = baseLinesPerThread + (tIdx < remainder);
 
 	const auto lineStarts = new unsigned int[threadLineAmt];
 	const auto lineSizes = new unsigned int[threadLineAmt];
-	auto finishedLines = new bool[threadLineAmt];
-	unsigned int finishedLinesAmt = 0;
 
+	// Calculate the start and size of each line
 	for (int i = 0; i < threadLineAmt; i++)
 	{
 		unsigned int lineIdx;
-		if (tIdx < remainder)
-		{
-			lineIdx = tIdx * (linesPerThread + 1) + i;
-		}
-		else
-		{
-			lineIdx = tIdx * linesPerThread + i + remainder;
-		}
+		if (tIdx < remainder) { lineIdx = tIdx * (baseLinesPerThread + 1) + i; }
+		else { lineIdx = tIdx * baseLinesPerThread + i + remainder; }
+
 		//printf("Thread %d: Line %d: Index: %d\n", tIdx, i, lineIdx);
 
 		if (lineIdx != 0)
@@ -102,22 +75,31 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* trut
 		}
 		//printf("Thread %d: Line %d: Start: %d, Size: %d\n", tIdx, lineIdx, lineStarts[i], lineSizes[i]);
 	}
+
 	cuda_SYNCTHREADS();
 
-	__shared__ unsigned long long int globalBestRMS;
+	__shared__ SortUnion globalBestRMS;
+	auto finishedLines = new bool[threadLineAmt];
+	unsigned int finishedLinesAmt = 0;
+
+	globalBestRMS.floats[0] = __float_as_uint(99999);
+	globalBestRMS.ints[1] = 99999;
 
 	for (unsigned int l = 0; l < globalLineAmt; l++)
 	{
-		// Reset global best
-		globalBestRMS = ((unsigned long long int)99999 << 32) | __float_as_uint(99999);
+		//if (globalBestRMS.ints[1] != 99999) { printf("Error: Global Best did not reset correctly. \n"); }
+
 		float bestRMS = 99999;
 		unsigned int bestRMSIdx = 9999999;
 		unsigned int bestLocalIdx = 9999;
 		for (int j = 0; j < threadLineAmt; j += 1)
 		{
-			float error = calculateRMSError(threadImg, truthImg, imgSize, lineArray, lineStarts[j], lineSizes[j]);
-			//printf("Line %d: Error: %f\n", tIdx * linesPerThread + j, error);
-			if (error < bestRMS && !finishedLines[j])
+			if (finishedLines[j]) { continue; }
+
+			const float error = calculateRMSError(truthImg, imgSize, lineArray, lineStarts[j], lineSizes[j]);
+
+			// If error is better than the current best, update thread best
+			if (error < bestRMS)
 			{
 				bestRMS = error;
 				bestRMSIdx = tIdx;
@@ -130,20 +112,20 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* trut
 		cuda_SYNCTHREADS();
 
 		// Find the best RMS from all threads
-		atomicMinIndex(&globalBestRMS, bestRMS, bestRMSIdx);
+		atomicMinIndex(&globalBestRMS.ulong, bestRMS, bestRMSIdx);
 
-		unsigned int bestThreadIdx = (globalBestRMS >> 32);
-		float bestRMSValue = __uint_as_float(globalBestRMS & 0xFFFFFFFF);
+		const unsigned int bestThreadIdx = globalBestRMS.ints[1];
+		const float bestRMSValue = globalBestRMS.floats[0];
 
 		if (bestRMSValue > bestRMS)
 		{
-			printf("Error: Best RMS: %f, Global Best RMS: %f\n", bestRMS, bestRMSValue);
+			printf("ERROR: SORT FAILED... Best RMS: %f, Global Best RMS: %f\n", bestRMS, bestRMSValue);
 		}
 
 		// If this thread has the best RMS
 		if (tIdx == bestThreadIdx)
 		{
-			printf("Thread %d: Line #: %d, LineIdx: %d, Global Best RMS: %f\n", bestThreadIdx, l, bestLocalIdx, bestRMSValue);
+			printf("Thread %d: Line #: %d, LineIdx: %d, Global Best RMS: %f\n", tIdx, l, bestLocalIdx, bestRMSValue);
 			for (int p = 0; p < lineSizes[bestLocalIdx]; p += 2)
 			{
 				unsigned short x = lineArray[lineStarts[bestLocalIdx] + p];
@@ -151,16 +133,13 @@ __global__ void evaluateLineKernel(unsigned char* threadImg, unsigned char* trut
 				threadImg[x + y * imgSize] = 0;
 				truthImg[x + y * imgSize] = min(truthImg[x + y * imgSize] + 40, 255);
 			}
-			finishedLines[bestLocalIdx] = true;
 
-			finishedLinesAmt++;
-			if (finishedLinesAmt == threadLineAmt)
-			{
-				delete[] lineStarts;
-				delete[] lineSizes;
-				delete[] finishedLines;
-				return;
-			}
+			// Reset global best
+			globalBestRMS.floats[0] = __float_as_uint(99999);
+			globalBestRMS.ints[1] = 99999;
+
+			finishedLines[bestLocalIdx] = true;
+			if (++finishedLinesAmt == threadLineAmt) { break; }
 		}
 
 		cuda_SYNCTHREADS();
@@ -180,6 +159,7 @@ void runCUDAThreader()
 	const auto pins = utils::generatePins(imgSize, NUM_PINS);
 
 	std::vector<unsigned int> linePtrOffsets(UNIQUE_LINE_NUMBER);
+	std::cout << "Calculating lines..." << std::endl;
 	auto lines = calculateLines(pins, imgSize, linePtrOffsets);
 
 	unsigned char* threadImageGPU;
