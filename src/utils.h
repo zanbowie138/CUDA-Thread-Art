@@ -34,6 +34,24 @@ namespace utils
         return three_channel_image;
     }
 
+    static bool isLineIntersect(unsigned int p1l1, unsigned int p2l1, unsigned int p1l2, unsigned int p2l2, unsigned int pinNum)
+    {
+        struct Line {
+            unsigned int p1;
+            unsigned int p2;
+        };
+
+        Line l1 = { std::min(p1l1, p2l1), std::max(p1l1, p2l2) };
+        Line l2 = { std::min(p1l2, p2l2), std::max(p1l2, p2l2) };
+
+        unsigned int o = l1.p1;
+        l1 = { 0, l1.p2 - o };
+        l2 = { (l2.p1 - o) % pinNum, (l2.p2 - o) % pinNum };
+
+        // If both pins of the second line are on the same side of the first line, they are not intersecting
+        return l2.p1 < l1.p2 != l2.p2 < l1.p2;
+    }
+
     // Converts an rgb image to a grayscale image
     static std::vector<unsigned char> convertToGrayscale(const unsigned char* rgb_image, const int width, const int height) {
         std::vector<unsigned char> gray_image(width * height);
@@ -96,8 +114,9 @@ namespace utils
 
     // Returns a vector of line coordinates, and a vector of line ending indices
     // Ensures that line coordinates are in contiguous memory
-    static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, const int imgSize, std::vector<unsigned int>& lineEndingIdx)
+    static std::vector<unsigned short> calculateLines(const std::vector<Point>& pins, const int imgSize, std::vector<unsigned int>& lineEndingIdx, std::vector<unsigned int>& pinIdx)
     {
+        // Calculate line coordinates
         std::vector<std::vector<Point>> lines(UNIQUE_LINE_NUMBER);
         size_t pointAmount = 0;
         for (size_t i = 0; i < NUM_PINS - 1; i++) {
@@ -105,6 +124,8 @@ namespace utils
                 const size_t lineIdx = (NUM_PINS * i - i * (i + 1) / 2) + j - (i + 1);
                 lines[lineIdx] = getLinePoints(pins[i], pins[j], LINE_WIDTH, imgSize);
                 pointAmount += lines[lineIdx].size();
+                pinIdx[lineIdx * 2] = i;
+                pinIdx[lineIdx * 2 + 1] = j;
             }
         }
 
@@ -177,21 +198,17 @@ namespace utils
         return std::sqrt(sum / count);
     }
 
-    static double calculateRMSError(const std::vector<unsigned char>& img1, const std::vector<unsigned char>& img2, size_t size, const std::vector<Point> coordinates) {
+    static float calculateRMSError(const std::vector<unsigned char>& img1, const std::vector<unsigned char>& img2, size_t size, const std::vector<Point> coordinates) {
         long sum = 0.0;
-        long count = 0;
 
         for (Point p : coordinates) {
             int diff = static_cast<int>(img1[p.y * size + p.x]) - 0;
-            sum += diff * diff;
-            ++count;
+            sum += diff * diff / coordinates.size();
         }
 
-        if (count == 0) {
-            assert(false && "Empty RMS");
-        }
+        if (coordinates.empty()) { assert(false && "Empty RMS"); }
 
-        return std::sqrt(sum / count);
+        return std::sqrt(sum);
     }
 
     static std::vector<unsigned char> prepareImage(const char* filename, size_t& size) {

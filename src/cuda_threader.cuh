@@ -17,6 +17,7 @@
 #else
 #define cuda_SYNCTHREADS()
 unsigned int min(unsigned int a, unsigned int b);
+unsigned int max(unsigned int a, unsigned int b);
 #endif
 
 #define cudaErrorCheck(ans) { gpuAssert((ans), __FILE__, __LINE__); }
